@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Pre-commit gate: block secrets and unsanitized fixtures before they enter history.
+# Git history is permanent — the gate has to sit before commit, not at review time.
+# Mirrors netmiko-config-audit's scripts/pre-commit, adapted for PAN-OS secret shapes.
+#
+# Install (once per clone):  ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+set -uo pipefail
+
+fail=0
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+while IFS= read -r f; do
+    [ "$f" = "scripts/pre-commit" ] && continue
+
+    case "$f" in
+        *.example) ;;
+        *.env|*secrets.env)
+            echo "BLOCK: $f looks like a real secrets file (only *.example is committable)"
+            fail=1 ;;
+    esac
+
+    case "$f" in
+        *.xml)
+            if ! PYTHONPATH=src python3 -m panos_audit.sanitize_check "$f"; then
+                fail=1
+            fi ;;
+    esac
+
+    added=$(git diff --cached -U0 -- "$f" | command grep '^+[^+]' || true)
+    if printf '%s' "$added" | command grep -qE 'BEGIN (RSA|EC|DSA|OPENSSH)? ?PRIVATE KEY|<phash>|LUFRPT[A-Za-z0-9+/=]{10,}|ghp_[A-Za-z0-9]{20,}|github_pat_|sk-ant-[A-Za-z0-9]'; then
+        echo "BLOCK: $f stages content matching a hard secret pattern (key/hash/token)"
+        fail=1
+    fi
+
+    case "$f" in
+        *.example|tests/*) ;;
+        *)
+            if printf '%s' "$added" | command grep -qE 'PANOS_API_KEY=[^ <$"{}]{3}'; then
+                echo "BLOCK: $f stages a credential-assignment shape (PANOS_API_KEY=)"
+                fail=1
+            fi ;;
+    esac
+done <<< "$staged"
+
+if command -v gitleaks >/dev/null 2>&1; then
+    if ! gitleaks git --pre-commit --staged --no-banner --redact >/dev/null 2>&1; then
+        echo "BLOCK: gitleaks flagged a secret in staged changes"
+        echo "       see it: gitleaks git --pre-commit --staged --verbose"
+        fail=1
+    fi
+fi
+
+if [ "$fail" -ne 0 ]; then
+    echo
+    echo "Commit blocked by scripts/pre-commit. Fix the file, or if this is a"
+    echo "verified false positive, bypass ONCE with: git commit --no-verify"
+fi
+exit "$fail"
