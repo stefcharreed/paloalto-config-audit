@@ -109,7 +109,7 @@ def main() -> int:
         print("usage: python sanitize_check.py <config-file>")
         return 2
     path = sys.argv[1]
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         config_text = fh.read()
     findings = check_config(config_text)
     _print_report(path, findings)

@@ -1,9 +1,9 @@
 """Smoke tests — prove the offline pipeline (no live Panorama/firewall) works
 end to end, same shape as netmiko-config-audit's phantom-drift guard.
 """
+from panos_audit.collector import fetch_running_config
 from panos_audit.drift import compare_to_baseline
 from panos_audit.inventory import Device
-from panos_audit.collector import fetch_running_config
 
 BASELINE = """<config>
   <rules>

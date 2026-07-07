@@ -58,7 +58,12 @@ def _cmd_diff(args: argparse.Namespace) -> int:
             any_drift = True
             console.print(f"[yellow]{r.device}: DRIFT[/yellow]")
             for line in drift.diff_lines:
-                color = "green" if line.startswith("+") else "red" if line.startswith("-") else "dim"
+                if line.startswith("+"):
+                    color = "green"
+                elif line.startswith("-"):
+                    color = "red"
+                else:
+                    color = "dim"
                 console.print(f"[{color}]{line}[/{color}]")
         else:
             console.print(f"[green]{r.device}: in sync[/green]")
@@ -69,7 +74,9 @@ def _cmd_report(args: argparse.Namespace) -> int:
     cfg = load_config(args.config)
     results = collect_all(cfg.devices)
     drift_results = [
-        compare_to_baseline(r.device, r.config_text, load_baseline(cfg.settings.baseline_dir, r.device))
+        compare_to_baseline(
+            r.device, r.config_text, load_baseline(cfg.settings.baseline_dir, r.device)
+        )
         for r in results if r.ok
     ]
     for r in results:
