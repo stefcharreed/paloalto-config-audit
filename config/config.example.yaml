@@ -1,0 +1,26 @@
+# Copy to config/config.yaml and edit. Commit only this sanitized example;
+# config.yaml is where your real addressing / device group names go.
+
+settings:
+  # Where pulled configs are written. Point this at your SEPARATE, private
+  # backup repo — NOT inside this code repo. Same pattern as netmiko-config-audit.
+  backup_dir: "../panos-config-backups"
+  # Per-device baselines (intended state).
+  baseline_dir: "../panos-config-backups/baselines"
+  # Structured JSON run reports.
+  report_path: "../panos-config-backups/reports"
+
+devices:
+  # A single managed firewall, queried directly.
+  - name: edge-fw
+    host: 192.0.2.10          # placeholder — replace with your lab/Panorama address
+    mode: firewall            # firewall | panorama
+
+  # A firewall managed through Panorama — pull its device-group config via
+  # Panorama's API instead of talking to the firewall directly.
+  - name: branch-fw-01
+    host: 192.0.2.5           # Panorama address
+    mode: panorama
+    device_group: branch-offices
+    # Optional per-device API key override; falls back to secrets.env if omitted.
+    # api_key: "..."
