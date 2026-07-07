@@ -11,6 +11,18 @@
 > ruff now runs in its CI. Still open, tracked in the README roadmap:
 > real-gear validation (the gate for calling anything "working"), promote /
 > set-baseline, Dockerfile + Trivy parity, rule-level drift summaries.
+>
+> **Second update, 2026-07-07 (evening):** CLI-experience parity landed —
+> `promote` and `set-baseline` ported (plan/apply split, y/N gates, exit codes
+> 0/1/2), `configure` wizard (repo-root-first with separate-repo + git-worktree
+> validation), first-run API-key wizard (confirmed entry, dotenv-corruption
+> rejection, TTY detection for cron), single-device `backup`, file-only `diff`
+> with the NO BASELINE vs DRIFT distinction, and a CLAUDE.md mirroring the
+> sibling's architecture rules. 73 tests. `push` is the one deliberate
+> non-port: PAN-OS candidate-config + commit semantics get their own design,
+> per the note in the Architecture section below. Remaining: real-gear
+> validation, Dockerfile + Trivy parity, rule-level drift summaries, an MCP
+> adapter.
 
 Written 2026-07-07, the day this repo was scaffolded. Both projects are held to
 the same bar; findings run in **both** directions. Items marked ⬜ are open work
