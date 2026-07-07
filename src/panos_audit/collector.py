@@ -9,7 +9,7 @@ and unit-test the pipeline against saved config dumps, with no live device.
 
 PAN-OS API notes (verify against your platform's version before relying on this):
   - Direct firewall: GET https://<host>/api/?type=config&action=show&xpath=/config
-    &key=<api_key>
+    with the API key in the X-PAN-KEY header (not the query string — see below)
   - Through Panorama, for a device group's pushed config: xpath targets
     /config/devices/entry/device-group/entry[@name='<device_group>']
   - Get a key once via: /api/?type=keygen&user=<u>&password=<p>, then use that
@@ -59,16 +59,19 @@ def fetch_running_config(device: Device, source_text: str | None = None) -> Coll
     # in environments that never touch the network.
     import requests
 
+    # The key goes in the X-PAN-KEY header, never as a `key=` query parameter —
+    # query strings are routinely written to web-server/proxy access logs, and
+    # an API key in a log line is a leaked credential.
     params = {
         "type": "config",
         "action": "show",
         "xpath": _xpath_for(device),
-        "key": device.api_key,
     }
     try:
         resp = requests.get(
             f"https://{device.host}/api/",
             params=params,
+            headers={"X-PAN-KEY": device.api_key},
             timeout=_TIMEOUT,
             verify=False,  # TODO: pin real cert/CA bundle before use outside a lab
         )
