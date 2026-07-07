@@ -7,11 +7,19 @@ never touches the repo. Mirrors netmiko-config-audit's inventory.py.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 from dotenv import load_dotenv
+
+# device_group is spliced into an XPath expression by the collector, inside
+# single quotes. Validate it here — at load time, before any request is built —
+# so a name that would break (or reshape) the query is a config error, not a
+# malformed API call. PAN-OS device-group names are alphanumerics, space,
+# dot, underscore, hyphen; this allowlist matches that.
+_DEVICE_GROUP_RE = re.compile(r"^[A-Za-z0-9._ -]+$")
 
 
 @dataclass
@@ -62,6 +70,13 @@ def load_config(config_path: str | Path, secrets_path: str | Path = "secrets.env
             raise ValueError(f"device {d['name']}: mode must be 'firewall' or 'panorama'")
         if d["mode"] == "panorama" and not d.get("device_group"):
             raise ValueError(f"device {d['name']}: mode=panorama requires 'device_group'")
+        group = d.get("device_group", "")
+        if group and not _DEVICE_GROUP_RE.match(group):
+            raise ValueError(
+                f"device {d['name']}: device_group {group!r} contains characters "
+                f"outside [A-Za-z0-9._ -] — it is embedded in an XPath query and "
+                f"must not carry quotes/brackets"
+            )
 
         devices.append(
             Device(

@@ -1,5 +1,17 @@
 # paloalto-config-audit vs. netmiko-config-audit — gap analysis
 
+> **Status update, 2026-07-07 (later the same day):** most of the debt below is
+> paid. Done: 46 tests (sanitizer, normalize, drift, inventory, gitstore
+> pathspec-scoping regression, collector, report, CLI exit codes), committed
+> sanitizer-passing fixtures, CI (ruff + pytest 3.10–3.12, least-privilege,
+> pinned actions), SECURITY.md, THREAT-MODEL.md with dated accepted risks
+> (AR-1 TLS, AR-2 key scope), normalize's silent fallback made loud
+> (UserWarning + empty-input handled), device_group validated against
+> XPath-unsafe characters at load time. Netmiko's 27 ruff errors are fixed and
+> ruff now runs in its CI. Still open, tracked in the README roadmap:
+> real-gear validation (the gate for calling anything "working"), promote /
+> set-baseline, Dockerfile + Trivy parity, rule-level drift summaries.
+
 Written 2026-07-07, the day this repo was scaffolded. Both projects are held to
 the same bar; findings run in **both** directions. Items marked ⬜ are open work
 in this repo; items marked ⚠️ are findings against netmiko-config-audit found

@@ -23,6 +23,7 @@ What it deliberately KEEPS:
 """
 from __future__ import annotations
 
+import warnings
 import xml.etree.ElementTree as ET
 
 
@@ -39,13 +40,22 @@ def normalize(config_text: str) -> list[str]:
     Falls back to raw non-blank lines if the text isn't parseable XML — this
     keeps the function usable during early development against partial/mocked
     fixtures, but a normalize() that silently no-ops on real device output
-    would hide malformed API responses, so this fallback is deliberately loud:
-    callers should treat ParseError-triggered fallback as worth investigating,
-    not steady-state behavior.
+    would hide malformed API responses, so the fallback emits a UserWarning:
+    ParseError-triggered fallback is worth investigating, never steady-state.
     """
+    if not config_text.strip():
+        # Empty input is a known state (e.g. "no baseline authored yet"), not
+        # malformed XML — return no lines, without the ParseError warning below.
+        return []
     try:
         root = ET.fromstring(config_text)
-    except ET.ParseError:
+    except ET.ParseError as exc:
+        warnings.warn(
+            f"normalize(): input is not parseable XML ({exc}); falling back to "
+            f"raw line comparison — if this input came from a live device, the "
+            f"collector likely returned an error page, not a config",
+            stacklevel=2,
+        )
         return [line.rstrip() for line in config_text.splitlines() if line.strip()]
 
     _strip_volatile(root)

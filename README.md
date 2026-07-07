@@ -4,7 +4,7 @@
 
 A Python tool that pulls PAN-OS/Panorama configuration over the PAN-OS API, version-controls it in git, and flags configuration drift against a per-device baseline — the same drift-detection pattern as [netmiko-config-audit](https://github.com/stefcharreed/netmiko-config-audit), applied to firewall policy instead of Cisco IOS.
 
-> **Status:** 🚧 Scaffold — architecture and offline pipeline in place (collector, normalize, drift, git backend, CLI), unit-tested against fixture XML. **Not yet validated against a real firewall or Panorama instance.** See [Roadmap](#roadmap).
+> **Status:** 🚧 Offline pipeline complete — collector, normalize, drift, git backend, and CLI covered by a 46-test suite against sanitized fixtures, with lint + tests in CI (Python 3.10–3.12). **Not yet validated against a real firewall or Panorama instance** — that's the gate before anything here is called "working." See [Roadmap](#roadmap), [THREAT-MODEL.md](THREAT-MODEL.md), and [COMPARISON.md](COMPARISON.md) for the same-bar gap analysis against [netmiko-config-audit](https://github.com/stefcharreed/netmiko-config-audit).
 
 ## Overview
 
@@ -127,10 +127,14 @@ pytest tests/ -q
 ## Roadmap
 
 - [x] Repo scaffold, packaging, config + secrets loader, git backend
-- [x] PAN-OS API collector with offline `source_text` seam
-- [x] XML-aware normalization (strips per-object `uuid`, keeps rule order) with a phantom-drift-guard test
+- [x] PAN-OS API collector with offline `source_text` seam (API key in the `X-PAN-KEY` header, never the query string)
+- [x] XML-aware normalization (strips per-object `uuid`, keeps rule order), loud fallback on unparseable input
 - [x] Structured JSON run report
 - [x] Pre-commit config sanitizer (`sanitize_check.py`, adapted for PAN-OS phash/API-key shapes)
+- [x] 46-test suite: sanitizer (incl. every-committed-fixture-is-clean), normalize (phantom-drift guard, order preservation, loud fallback), drift, inventory validation (incl. XPath-unsafe device_group rejection), gitstore (incl. the pathspec-scoping regression test), collector seam, report, CLI exit codes
+- [x] Sanitized PAN-OS-shaped XML fixtures (RFC 5737 IPs, fake names, zero secrets)
+- [x] CI: ruff + pytest on Python 3.10–3.12, `permissions: contents: read`, pinned actions
+- [x] SECURITY.md + THREAT-MODEL.md (assets, attackers, trust boundaries, dated accepted risks)
 - [ ] **Validate the collector against a real firewall or Panorama instance** — nothing below this line should be trusted as "working" until this happens (per the "validate against the real thing" rule — fixtures prove logic, real gear proves it works)
 - [ ] Human-gated `promote` (approve a drifted config into the baseline) — port from netmiko-config-audit's design
 - [ ] `set-baseline` — author a baseline from a file, no live pull needed
