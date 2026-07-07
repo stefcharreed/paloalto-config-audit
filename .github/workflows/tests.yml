@@ -1,0 +1,43 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# CI only reads the repo; drop the token's default write scopes.
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Ruff
+        run: ruff check src/ tests/
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Same rationale as netmiko-config-audit: the sanitizer's IP handling
+        # leans on ipaddress behavior that changed in 3.12, so prove the range
+        # rather than assume it. Local dev runs 3.14 — CI is what actually
+        # verifies the requires-python >= 3.10 floor.
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]"
+      - name: Run tests
+        run: pytest tests/ -q
