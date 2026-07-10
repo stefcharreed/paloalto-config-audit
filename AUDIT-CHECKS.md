@@ -33,7 +33,7 @@ Enabled `allow` rule with source AND destination both `any`. Severity `high`
 when service and application are also `any` (passes literally everything),
 `medium` otherwise. Any/any **deny** never fires — that's the normal cleanup
 rule. Disabled rules never fire — they pass no traffic (their hygiene is
-`disabled-rule-hygiene`, below).
+`disabled-rule-hygiene`'s job).
 
 ### logging-disabled
 Enabled `allow` rule with `<log-end>no</log-end>` — traffic it passes leaves
@@ -48,29 +48,33 @@ Deny rules and disabled rules never fire — v1 scopes to enabled allows.
 - **Later:** unlogged deny rules; rules logging locally with no log-forwarding
   profile (needs profile shapes in fixtures first).
 
+### shadowed-rule
+A rule that can never match: an earlier **enabled** rule already covers every
+match field (from, to, source, destination, service, application) — `any`
+covers all, otherwise the later rule's members must be a subset of the
+earlier's. First-match top-down makes the covered rule dead policy; the
+classic cause is the 2 a.m. emergency rule inserted *above* the specific rule
+it now shadows. Severity `medium`: nothing extra is passed, but the rulebase
+misleads reviewers — and if the shadower is removed, the dead rule silently
+comes to life. One finding per shadowed rule, naming its earliest shadower.
+Disabled rules neither shadow nor get flagged (not in the match path).
+**v1 is name-level only** — no address-object/group resolution, so unrelated
+names read as disjoint: it can under-report shadowing, never invent it.
+Direction matters and is test-pinned: a *wider* rule after a specific one is
+NOT shadowed.
+- **Later:** resolve address objects/groups to prefixes so `{10.0.0.0/8}`
+  covers `{10.1.1.5}` (this is where the check gets powerful).
+
+### disabled-rule-hygiene
+Any disabled rule, severity `low`: it passes no traffic today, but each one is
+policy a click away from live with no change control, and dead entries make
+the rulebase harder to review. Owns disabled rules outright — the other checks
+skip them for exactly this reason. True-negatives pinned: absent `<disabled>`
+and explicit `<disabled>no</disabled>` never fire.
+
 ## Planned — build these next, in this order
 
-### 1. disabled-rule-hygiene  (severity: low)
-Disabled rules accumulate — each is a rule someone can re-enable in one click
-without change control, and they make the rulebase harder to read.
-- **Detect:** any rule where `_is_disabled()` is true. Reuse the helper.
-- **True-negative:** an enabled rule with no `<disabled>` element at all.
-
-### 2. shadowed-rule  (severity: medium)
-A rule that can never match because an earlier rule already matches everything
-it would — dead policy that misleads reviewers. The 2 a.m. emergency rule
-placed *above* a specific allow shadows it.
-- **Detect (v1, deliberately conservative):** rule B is shadowed if an earlier
-  enabled rule A has, for **every** match field (from, to, source, destination,
-  service, application), either `any` or a member set that is a superset of
-  B's — name-level comparison only, no address-object resolution yet.
-- **Superset check on names only** for v1: resolving address objects/groups to
-  prefixes is real work (and where this check eventually gets powerful) —
-  don't guess ahead; note it as the check's own roadmap line.
-- **True-negative:** two rules with disjoint destinations; and a later rule
-  *wider* than an earlier one (that's not shadowed).
-
-### 3. broad-service-object  (severity: medium)
+### 1. broad-service-object  (severity: medium)
 Rules that allow `application-default`-bypassing wide service ranges — e.g. a
 custom service object spanning huge port ranges, or `service` = `any` with a
 scoped app list (app-id still narrows it, hence medium at most).
@@ -82,7 +86,7 @@ scoped app list (app-id still narrows it, hence medium at most).
   it needs a second extraction helper (`iter_service_objects`), same pattern
   as `iter_security_rules`.
 
-### 4. mgmt-plane-settings  (severity: high)
+### 2. mgmt-plane-settings  (severity: high)
 Management-plane weaknesses live under `<deviceconfig><system>` /
 `<service>`, not the rulebase: HTTP or telnet management enabled, SNMP v2c
 communities, no login banner.
@@ -97,7 +101,7 @@ communities, no login banner.
 ## Later / bigger
 
 - Address-object resolution for shadowed-rule (name superset → prefix
-  superset).
+  superset) — tracked under that check's own Later bullet above.
 - Zone-protection / DoS-profile coverage per zone.
 - Findings in the JSON run report (`report.py`) so the observability stack can
   scrape a `panos_audit_findings{severity=...}` metric.
