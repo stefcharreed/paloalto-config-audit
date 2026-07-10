@@ -35,32 +35,28 @@ when service and application are also `any` (passes literally everything),
 rule. Disabled rules never fire — they pass no traffic (their hygiene is
 `disabled-rule-hygiene`, below).
 
-## Planned — build these next, in this order
-
-### 1. logging-disabled  (severity: medium) — SCAFFOLDED
-An allow rule with `<log-end>no</log-end>` (or no log-forwarding profile at
-all, once profiles are in fixtures) means traffic it passes leaves no trail —
-the first thing an incident responder needs is exactly what's missing.
-- **Detect:** enabled allow rule where `log-end` text is `no`. PAN-OS defaults
-  log-end to yes when the element is absent, so **absent ≠ finding** — that's
-  the true-negative test. Use `findtext("./log-end") == "no"` (findtext
-  returns None on absence, which never equals `"no"`).
-- **Why medium not high:** it passes no extra traffic; it blinds you to the
-  traffic it passes.
-- **Scaffold in place:** `check_logging_disabled` stub in `audit.py` (steps as
-  TODOs, unregistered) + the full test contract in `tests/test_audit.py`,
-  skip-marked. To finish: implement the body, register it in `CHECKS`, delete
-  the `logging_scaffold` skip marker, `pytest tests/ -q` green.
+### logging-disabled
+Enabled `allow` rule with `<log-end>no</log-end>` — traffic it passes leaves
+no session-end log (bytes, app, duration: what incident response reconstructs
+from). Severity `medium`: it passes no extra traffic, it blinds you to the
+traffic it passes. Two traps are load-bearing here, each pinned by a test:
+**absent `<log-end>` defaults to YES** and must not fire (PAN-OS omits
+defaulted elements — flagging absence fires on nearly every rule), and the
+text comparison **strips whitespace** (a pretty-printed export renders
+`\n  no\n`; exact equality would false-negative a rule whose logging is off).
+Deny rules and disabled rules never fire — v1 scopes to enabled allows.
 - **Later:** unlogged deny rules; rules logging locally with no log-forwarding
   profile (needs profile shapes in fixtures first).
 
-### 2. disabled-rule-hygiene  (severity: low)
+## Planned — build these next, in this order
+
+### 1. disabled-rule-hygiene  (severity: low)
 Disabled rules accumulate — each is a rule someone can re-enable in one click
 without change control, and they make the rulebase harder to read.
 - **Detect:** any rule where `_is_disabled()` is true. Reuse the helper.
 - **True-negative:** an enabled rule with no `<disabled>` element at all.
 
-### 3. shadowed-rule  (severity: medium)
+### 2. shadowed-rule  (severity: medium)
 A rule that can never match because an earlier rule already matches everything
 it would — dead policy that misleads reviewers. The 2 a.m. emergency rule
 placed *above* a specific allow shadows it.
@@ -74,7 +70,7 @@ placed *above* a specific allow shadows it.
 - **True-negative:** two rules with disjoint destinations; and a later rule
   *wider* than an earlier one (that's not shadowed).
 
-### 4. broad-service-object  (severity: medium)
+### 3. broad-service-object  (severity: medium)
 Rules that allow `application-default`-bypassing wide service ranges — e.g. a
 custom service object spanning huge port ranges, or `service` = `any` with a
 scoped app list (app-id still narrows it, hence medium at most).
@@ -86,7 +82,7 @@ scoped app list (app-id still narrows it, hence medium at most).
   it needs a second extraction helper (`iter_service_objects`), same pattern
   as `iter_security_rules`.
 
-### 5. mgmt-plane-settings  (severity: high)
+### 4. mgmt-plane-settings  (severity: high)
 Management-plane weaknesses live under `<deviceconfig><system>` /
 `<service>`, not the rulebase: HTTP or telnet management enabled, SNMP v2c
 communities, no login banner.

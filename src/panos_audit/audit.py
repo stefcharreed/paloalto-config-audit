@@ -111,37 +111,53 @@ def check_overly_permissive(device: str, rules: list[ET.Element]) -> list[Findin
 
 
 def check_logging_disabled(device: str, rules: list[ET.Element]) -> list[Finding]:
-    """SCAFFOLD — spec in AUDIT-CHECKS.md (logging-disabled); tests already
-    written in tests/test_audit.py (skip-marked). To finish: implement the body,
-    add this function to CHECKS below, remove the skip marker, run pytest.
+    """Flag enabled allow rules that explicitly disable the session-end log.
 
-    Flag enabled allow rules with <log-end>no</log-end> — traffic they pass
-    leaves no session-end log, which is exactly what incident response needs.
+    The session-end log carries bytes, application, and duration — what
+    incident response reconstructs traffic from. An allow rule with
+    <log-end>no</log-end> passes traffic that leaves no trail.
 
-    THE TRAP: PAN-OS omits elements at their default, and log-end defaults to
-    YES — so an ABSENT <log-end> element means logging is fine and must NOT
-    fire. Detect `findtext("./log-end") == "no"` (findtext returns None when
-    absent, which never equals "no"). Flagging absence would fire on nearly
-    every rule and drown the audit in noise.
+    PAN-OS omits elements at their default value, and log-end defaults to
+    YES — so an ABSENT <log-end> element is a rule logging normally and must
+    NOT fire (flagging absence would fire on nearly every rule and drown the
+    audit in noise). The comparison strips whitespace because a pretty-printed
+    export renders the text as "\\n  no\\n" — exact equality would silently
+    pass a rule whose logging is off, a false negative in a security check.
 
-    Severity medium: the rule passes no extra traffic; it blinds you to the
-    traffic it already passes. check slug: "logging-disabled" (stable once
-    shipped). Skip disabled rules and non-allow actions, same reasoning as
-    check_overly_permissive.
+    Severity medium, not high: the rule passes no extra traffic; it blinds
+    you to the traffic it already passes. Disabled rules and non-allow
+    actions are skipped, same reasoning as check_overly_permissive. Unlogged
+    deny rules and missing log-forwarding profiles are deliberate later
+    extensions — see AUDIT-CHECKS.md.
     """
     findings: list[Finding] = []
-    # TODO(stefan): iterate `rules`; for each rule:
-    #   1) skip disabled rules (_is_disabled) and non-allow actions
-    #   2) fire only when log-end is PRESENT with text "no"
-    #   3) append a Finding(check="logging-disabled", severity="medium",
-    #      rule=<name>, detail=<one actionable line>)
+    for rule in rules:
+        if rule.findtext("./action", default="") != "allow" or _is_disabled(rule):
+            continue
+        log_end = rule.findtext("./log-end")
+        if log_end is None or log_end.strip() != "no":
+            continue
+
+        name = rule.get("name") or "<unnamed>"
+        findings.append(
+            Finding(
+                device=device,
+                check="logging-disabled",
+                severity="medium",
+                rule=name,
+                detail=(
+                    f"allow rule '{name}' has log-end disabled — traffic it passes "
+                    f"leaves no session-end log; re-enable log at session end"
+                ),
+            )
+        )
     return findings
 
 
 # Registry: audit_config() runs these in order. Add new checks here.
 CHECKS = [
     check_overly_permissive,
-    # TODO(stefan): register check_logging_disabled once implemented
+    check_logging_disabled,
 ]
 
 

@@ -8,8 +8,6 @@ rule, which must NOT fire the permissive check.
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-import pytest
-
 from panos_audit.audit import (
     Finding,
     audit_config,
@@ -21,6 +19,10 @@ from panos_audit.audit import (
 FIXTURES = Path(__file__).parent / "fixtures"
 BASELINE = (FIXTURES / "fw1_baseline.xml").read_text(encoding="utf-8")
 DRIFTED = (FIXTURES / "fw1_current_drift.xml").read_text(encoding="utf-8")
+
+
+def _rule(xml: str) -> ET.Element:
+    return ET.fromstring(xml)
 
 
 def test_clean_rulebase_yields_no_findings():
@@ -46,7 +48,7 @@ def test_any_any_deny_does_not_fire():
 
 
 def test_scoped_service_downgrades_to_medium():
-    rule = ET.fromstring(
+    rule = _rule(
         """<entry name="broad-but-scoped-service">
              <from><member>untrust</member></from><to><member>trust</member></to>
              <source><member>any</member></source>
@@ -62,7 +64,7 @@ def test_scoped_service_downgrades_to_medium():
 
 
 def test_disabled_rule_is_skipped():
-    rule = ET.fromstring(
+    rule = _rule(
         """<entry name="old-emergency-rule">
              <source><member>any</member></source>
              <destination><member>any</member></destination>
@@ -94,20 +96,8 @@ def test_finding_serializes_to_plain_dict():
     assert json.loads(json.dumps(f.to_dict()))["device"] == "fw1"
 
 
-# --- logging-disabled (SCAFFOLD: these define the contract; implement
-# check_logging_disabled per AUDIT-CHECKS.md, register it in CHECKS, then
-# delete the skip marker and make them pass) --------------------------------
+# --- logging-disabled --------------------------------------------------------
 
-logging_scaffold = pytest.mark.skip(
-    reason="scaffold — implement check_logging_disabled, then remove this marker"
-)
-
-
-def _rule(xml: str) -> ET.Element:
-    return ET.fromstring(xml)
-
-
-@logging_scaffold
 def test_log_end_no_on_allow_rule_is_flagged_medium():
     rule = _rule(
         """<entry name="chatty-app-allow">
@@ -126,7 +116,6 @@ def test_log_end_no_on_allow_rule_is_flagged_medium():
     assert findings[0].rule == "chatty-app-allow"
 
 
-@logging_scaffold
 def test_absent_log_end_defaults_to_yes_and_does_not_fire():
     """THE load-bearing true-negative: PAN-OS omits defaulted elements, and
     log-end defaults to YES — an absent element is a rule logging normally.
@@ -143,7 +132,6 @@ def test_absent_log_end_defaults_to_yes_and_does_not_fire():
     assert check_logging_disabled("fw1", [rule]) == []
 
 
-@logging_scaffold
 def test_deny_rule_without_logging_does_not_fire_in_v1():
     """v1 scopes to allow rules only — unlogged denies are a real visibility
     gap but a deliberate later extension (see AUDIT-CHECKS.md)."""
@@ -158,7 +146,6 @@ def test_deny_rule_without_logging_does_not_fire_in_v1():
     assert check_logging_disabled("fw1", [rule]) == []
 
 
-@logging_scaffold
 def test_disabled_rule_with_log_end_no_is_skipped():
     rule = _rule(
         """<entry name="old-rule">
@@ -172,7 +159,6 @@ def test_disabled_rule_with_log_end_no_is_skipped():
     assert check_logging_disabled("fw1", [rule]) == []
 
 
-@logging_scaffold
 def test_logging_disabled_is_registered_and_reachable_via_audit_config():
     """Once registered in CHECKS, audit_config() must surface the finding
     end-to-end — a check that exists but isn't registered never runs."""
@@ -190,6 +176,78 @@ def test_logging_disabled_is_registered_and_reachable_via_audit_config():
     </entry></vsys></entry></devices></config>"""
     findings = audit_config("fw1", config)
     assert [f.check for f in findings] == ["logging-disabled"]
+
+
+def test_explicit_log_end_yes_does_not_fire():
+    """Guards against a presence-only implementation: <log-end>yes</log-end>
+    written out explicitly is a rule logging normally — the element existing
+    is not the finding, its value being 'no' is."""
+    rule = _rule(
+        """<entry name="explicit-logging">
+             <source><member>branch-lan</member></source>
+             <destination><member>web-srv-1</member></destination>
+             <action>allow</action>
+             <log-end>yes</log-end>
+           </entry>"""
+    )
+    assert check_logging_disabled("fw1", [rule]) == []
+
+
+def test_pretty_printed_log_end_no_still_fires():
+    """A formatted export renders the text as '\\n  no\\n' — exact string
+    equality would silently pass a rule whose logging is off (a false
+    negative in a security check). The comparison must strip."""
+    rule = _rule(
+        """<entry name="formatted-rule">
+             <source><member>branch-lan</member></source>
+             <destination><member>web-srv-1</member></destination>
+             <action>allow</action>
+             <log-end>
+               no
+             </log-end>
+           </entry>"""
+    )
+    findings = check_logging_disabled("fw1", [rule])
+    assert [f.rule for f in findings] == ["formatted-rule"]
+
+
+def test_multiple_quiet_rules_each_get_a_finding_in_policy_order():
+    quiet = """<entry name="{name}">
+                 <source><member>branch-lan</member></source>
+                 <destination><member>web-srv-1</member></destination>
+                 <action>allow</action>
+                 <log-end>no</log-end>
+               </entry>"""
+    rules = [
+        _rule(quiet.format(name="first-quiet")),
+        _rule(
+            """<entry name="fine-rule">
+                 <source><member>branch-lan</member></source>
+                 <destination><member>web-srv-1</member></destination>
+                 <action>allow</action>
+               </entry>"""
+        ),
+        _rule(quiet.format(name="second-quiet")),
+    ]
+    findings = check_logging_disabled("fw1", rules)
+    assert [f.rule for f in findings] == ["first-quiet", "second-quiet"]
+
+
+def test_unnamed_rule_gets_placeholder_not_none():
+    """A rule entry missing its name attribute must still produce a readable
+    finding — same placeholder convention as check_overly_permissive."""
+    rule = _rule(
+        """<entry>
+             <source><member>branch-lan</member></source>
+             <destination><member>web-srv-1</member></destination>
+             <action>allow</action>
+             <log-end>no</log-end>
+           </entry>"""
+    )
+    findings = check_logging_disabled("fw1", [rule])
+    assert len(findings) == 1
+    assert findings[0].rule == "<unnamed>"
+    assert "None" not in findings[0].detail
 
 
 def test_panorama_pre_rulebase_rules_are_found():

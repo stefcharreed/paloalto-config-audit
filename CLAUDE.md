@@ -52,7 +52,10 @@ and which shared rules are load-bearing.
   any/any **deny** never fires the permissive check (it's the normal cleanup
   rule), disabled rules never fire it (they pass no traffic), and an
   unparseable config is a high-severity finding, never "clean" — don't relax
-  any of those. NO BACKUP renders distinctly from clean, same reasoning as
+  any of those. In logging-disabled, absent `<log-end>` defaults to YES and
+  must never fire (PAN-OS omits defaulted elements), and its text comparison
+  strips whitespace (pretty-printed exports render `\n  no\n`; exact equality
+  would false-negative) — both are pinned by tests. NO BACKUP renders distinctly from clean, same reasoning as
   diff's NO BASELINE.
 - **`report` does not write backups** — it pulls, drift-checks, and writes the
   JSON summary. Backups are `backup`'s job.
