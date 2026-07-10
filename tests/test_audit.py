@@ -8,7 +8,15 @@ rule, which must NOT fire the permissive check.
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from panos_audit.audit import Finding, audit_config, check_overly_permissive, iter_security_rules
+import pytest
+
+from panos_audit.audit import (
+    Finding,
+    audit_config,
+    check_logging_disabled,
+    check_overly_permissive,
+    iter_security_rules,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 BASELINE = (FIXTURES / "fw1_baseline.xml").read_text(encoding="utf-8")
@@ -84,6 +92,104 @@ def test_finding_serializes_to_plain_dict():
 
     f = Finding(device="fw1", check="x", severity="low", rule=None, detail="d")
     assert json.loads(json.dumps(f.to_dict()))["device"] == "fw1"
+
+
+# --- logging-disabled (SCAFFOLD: these define the contract; implement
+# check_logging_disabled per AUDIT-CHECKS.md, register it in CHECKS, then
+# delete the skip marker and make them pass) --------------------------------
+
+logging_scaffold = pytest.mark.skip(
+    reason="scaffold — implement check_logging_disabled, then remove this marker"
+)
+
+
+def _rule(xml: str) -> ET.Element:
+    return ET.fromstring(xml)
+
+
+@logging_scaffold
+def test_log_end_no_on_allow_rule_is_flagged_medium():
+    rule = _rule(
+        """<entry name="chatty-app-allow">
+             <source><member>branch-lan</member></source>
+             <destination><member>web-srv-1</member></destination>
+             <service><member>service-https</member></service>
+             <application><member>web-browsing</member></application>
+             <action>allow</action>
+             <log-end>no</log-end>
+           </entry>"""
+    )
+    findings = check_logging_disabled("fw1", [rule])
+    assert len(findings) == 1
+    assert findings[0].check == "logging-disabled"
+    assert findings[0].severity == "medium"
+    assert findings[0].rule == "chatty-app-allow"
+
+
+@logging_scaffold
+def test_absent_log_end_defaults_to_yes_and_does_not_fire():
+    """THE load-bearing true-negative: PAN-OS omits defaulted elements, and
+    log-end defaults to YES — an absent element is a rule logging normally.
+    Flagging absence would fire on nearly every rule in every config."""
+    rule = _rule(
+        """<entry name="allow-web">
+             <source><member>any</member></source>
+             <destination><member>web-srv-1</member></destination>
+             <service><member>service-https</member></service>
+             <application><member>web-browsing</member></application>
+             <action>allow</action>
+           </entry>"""
+    )
+    assert check_logging_disabled("fw1", [rule]) == []
+
+
+@logging_scaffold
+def test_deny_rule_without_logging_does_not_fire_in_v1():
+    """v1 scopes to allow rules only — unlogged denies are a real visibility
+    gap but a deliberate later extension (see AUDIT-CHECKS.md)."""
+    rule = _rule(
+        """<entry name="deny-all">
+             <source><member>any</member></source>
+             <destination><member>any</member></destination>
+             <action>deny</action>
+             <log-end>no</log-end>
+           </entry>"""
+    )
+    assert check_logging_disabled("fw1", [rule]) == []
+
+
+@logging_scaffold
+def test_disabled_rule_with_log_end_no_is_skipped():
+    rule = _rule(
+        """<entry name="old-rule">
+             <source><member>any</member></source>
+             <destination><member>web-srv-1</member></destination>
+             <action>allow</action>
+             <log-end>no</log-end>
+             <disabled>yes</disabled>
+           </entry>"""
+    )
+    assert check_logging_disabled("fw1", [rule]) == []
+
+
+@logging_scaffold
+def test_logging_disabled_is_registered_and_reachable_via_audit_config():
+    """Once registered in CHECKS, audit_config() must surface the finding
+    end-to-end — a check that exists but isn't registered never runs."""
+    config = """<config><devices><entry name="fw"><vsys><entry name="vsys1">
+        <rulebase><security><rules>
+          <entry name="quiet-allow">
+            <source><member>branch-lan</member></source>
+            <destination><member>web-srv-1</member></destination>
+            <service><member>service-https</member></service>
+            <application><member>web-browsing</member></application>
+            <action>allow</action>
+            <log-end>no</log-end>
+          </entry>
+        </rules></security></rulebase>
+    </entry></vsys></entry></devices></config>"""
+    findings = audit_config("fw1", config)
+    assert [f.check for f in findings] == ["logging-disabled"]
 
 
 def test_panorama_pre_rulebase_rules_are_found():
