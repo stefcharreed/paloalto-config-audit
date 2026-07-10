@@ -2,6 +2,7 @@
 
     backup       Pull configs from all devices (or one) and commit them to git.
     diff         Compare on-disk backups against the per-device baseline (file-only).
+    audit        Run rulebase security checks against on-disk backups (file-only).
     report       Pull, drift-check, and emit a structured JSON summary of the run.
     promote      Bless a device's current backup as its new baseline (human-gated).
     set-baseline Author a device's baseline from a file, no live pull needed.
@@ -446,6 +447,62 @@ def _cmd_diff(cfg) -> int:
     return 1 if (any_drift or no_baseline) else 0
 
 
+_SEVERITY_STYLE = {"high": "red", "medium": "yellow", "low": "dim"}
+
+
+def _cmd_audit(cfg) -> int:
+    """File-only rulebase audit: on-disk backups vs. the security checks in
+    audit.py. No live pull, no credentials — same risk class as diff. Run
+    `backup` first to refresh the state being audited.
+    """
+    from . import audit
+
+    table = Table(title="Rulebase Audit")
+    table.add_column("Device")
+    table.add_column("Status")
+    per_device: dict[str, list[audit.Finding]] = {}
+    no_backup: list[str] = []
+
+    for device in cfg.devices:
+        backup_path = cfg.settings.backup_dir / f"{device.name}.xml"
+        if not backup_path.exists():
+            # No backup != a clean audit — there's nothing to inspect, same
+            # distinction diff draws for NO BASELINE.
+            no_backup.append(device.name)
+            table.add_row(device.name, "[cyan]NO BACKUP[/cyan]")
+            continue
+        findings = audit.audit_config(
+            device.name, backup_path.read_text(encoding="utf-8")
+        )
+        if findings:
+            per_device[device.name] = findings
+            worst = "high" if any(f.severity == "high" for f in findings) else "medium"
+            style = _SEVERITY_STYLE[worst]
+            table.add_row(device.name, f"[{style}]{len(findings)} FINDING(S)[/{style}]")
+        else:
+            table.add_row(device.name, "[green]clean[/green]")
+
+    console.print(table)
+    for name, findings in per_device.items():
+        body = Text()
+        for f in findings:
+            style = _SEVERITY_STYLE.get(f.severity, "yellow")
+            body.append(f"{f.severity.upper():<7}", style=style)
+            body.append(f"{f.check}  ", style="bold")
+            body.append(f"{f.detail}\n")
+        console.print(Panel(body, title=name, border_style="red"))
+    if no_backup:
+        console.print(
+            Panel(
+                "No backup on disk yet for: " + ", ".join(no_backup) + ". Nothing was "
+                "audited for these devices — run `panos-audit backup` first.",
+                title="No backup",
+                border_style="cyan",
+            )
+        )
+    return 1 if (per_device or no_backup) else 0
+
+
 def _cmd_report(cfg) -> int:
     from . import drift, report
     from .collector import collect_all
@@ -593,6 +650,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Only back up this device (default: all devices in config.yaml).",
     )
     sub.add_parser("diff", help="Drift check: on-disk backups vs. per-device baseline.")
+    sub.add_parser("audit", help="Rulebase security checks against on-disk backups.")
     sub.add_parser("report", help="Emit a JSON summary of the latest run.")
     p_promote = sub.add_parser(
         "promote", help="Promote a device's current backup to its baseline (human-gated)."
@@ -632,7 +690,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "backup":
             return _cmd_backup(cfg, args.device)
 
-        dispatch = {"diff": _cmd_diff, "report": _cmd_report}
+        dispatch = {"diff": _cmd_diff, "audit": _cmd_audit, "report": _cmd_report}
         return dispatch[args.command](cfg)
     except GitIdentityError as exc:
         console.print(f"[red]{exc}[/red]")

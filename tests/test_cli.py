@@ -181,6 +181,42 @@ def test_diff_needs_no_collector(tmp_path, monkeypatch):
     assert cli.main(["-c", str(config), "diff"]) == 0
 
 
+# --- audit (file-only) ---------------------------------------------------------
+
+def test_audit_clean_rulebase_exit_0(tmp_path, monkeypatch):
+    config, _, _ = _project(tmp_path, monkeypatch, current=CLEAN)
+    assert cli.main(["-c", str(config), "audit"]) == 0
+
+
+def test_audit_permissive_rule_exit_1_and_names_it(tmp_path, monkeypatch, capsys):
+    config, _, _ = _project(tmp_path, monkeypatch, current=DRIFT)
+    assert cli.main(["-c", str(config), "audit"]) == 1
+    out = capsys.readouterr().out
+    assert "temp-emergency-access" in out
+    assert "overly-permissive-rule" in out
+
+
+def test_audit_no_backup_is_distinct_and_exit_1(tmp_path, monkeypatch, capsys):
+    """No backup on disk != a clean audit — nothing was inspected. Same
+    distinction diff draws for NO BASELINE, for the same reason."""
+    config, _, _ = _project(tmp_path, monkeypatch)
+    assert cli.main(["-c", str(config), "audit"]) == 1
+    out = capsys.readouterr().out
+    assert "NO BACKUP" in out
+    assert "backup" in out
+
+
+def test_audit_needs_no_collector(tmp_path, monkeypatch):
+    """audit is file-only: it must never touch the network path."""
+    config, _, _ = _project(tmp_path, monkeypatch, current=CLEAN)
+
+    def explode(*a, **k):
+        raise AssertionError("audit called the collector")
+
+    monkeypatch.setattr(collector, "collect_all", explode)
+    assert cli.main(["-c", str(config), "audit"]) == 0
+
+
 # --- promote -------------------------------------------------------------------
 
 def test_promote_without_backup_exits_2(tmp_path, monkeypatch):

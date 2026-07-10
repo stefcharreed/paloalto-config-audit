@@ -4,7 +4,7 @@
 
 A Python tool that pulls PAN-OS/Panorama configuration over the PAN-OS API, version-controls it in git, and flags configuration drift against a per-device baseline — the same drift-detection pattern as [netmiko-config-audit](https://github.com/stefcharreed/netmiko-config-audit), applied to firewall policy instead of Cisco IOS.
 
-> **Status:** 🚧 Offline pipeline complete — collector, normalize, drift, git backend, promote/set-baseline, the configure + first-run wizards, and the CLI covered by a 73-test suite against sanitized fixtures, with lint + tests in CI (Python 3.10–3.12). **Not yet validated against a real firewall or Panorama instance** — that's the gate before anything here is called "working." See [Roadmap](#roadmap), [THREAT-MODEL.md](THREAT-MODEL.md), and [COMPARISON.md](COMPARISON.md) for the same-bar gap analysis against [netmiko-config-audit](https://github.com/stefcharreed/netmiko-config-audit).
+> **Status:** 🚧 Offline pipeline complete — collector, normalize, drift, git backend, promote/set-baseline, the configure + first-run wizards, and the CLI covered by a 95-test suite against sanitized fixtures, with lint + tests in CI (Python 3.10–3.12). **Not yet validated against a real firewall or Panorama instance** — that's the gate before anything here is called "working." See [Roadmap](#roadmap), [THREAT-MODEL.md](THREAT-MODEL.md), and [COMPARISON.md](COMPARISON.md) for the same-bar gap analysis against [netmiko-config-audit](https://github.com/stefcharreed/netmiko-config-audit).
 
 ## Overview
 
@@ -28,6 +28,7 @@ inventory (config.yaml) ──> collector (PAN-OS API) ──> gitstore ──> 
 | `collector.py` | Pull config via the PAN-OS XML API — direct firewall, or through Panorama for a device group |
 | `normalize.py` | Parse the config XML, strip volatile noise (e.g. per-object `uuid`), re-serialize with stable formatting |
 | `drift.py`     | Diff current vs. per-device baseline, after normalizing **both** sides |
+| `audit.py`     | Rulebase security checks — flags risky policy itself (e.g. any/any allow rules), not just drift; see [AUDIT-CHECKS.md](AUDIT-CHECKS.md) |
 | `gitstore.py`  | Write configs into the backup repo and commit them |
 | `report.py`    | Emit a structured JSON summary of the run |
 | `sanitize_check.py` | Lint a config for real IPs, API keys, and password hashes before it's committed |
@@ -56,6 +57,7 @@ paloalto-config-audit/
 │   ├── collector.py             # PAN-OS API pull (offline-testable via source_text)
 │   ├── normalize.py             # XML-aware normalization (pure, both-sides)
 │   ├── drift.py                 # per-device baseline diff
+│   ├── audit.py                 # rulebase security checks (see AUDIT-CHECKS.md)
 │   ├── gitstore.py              # git backend
 │   ├── report.py                # JSON run report
 │   └── sanitize_check.py        # pre-commit config linter
@@ -122,6 +124,7 @@ panos-audit configure   # interactively create/replace config.yaml (see Configur
 panos-audit backup      # pull configs and commit them to the backup repo
 panos-audit backup <DEVICE>          # same, but only this one device
 panos-audit diff        # drift check: on-disk backups vs. per-device baseline (file-only)
+panos-audit audit       # rulebase security checks against on-disk backups (file-only)
 panos-audit promote <DEVICE>         # review a device's drift, then approve it into the baseline
 panos-audit set-baseline <DEVICE> <FILE>   # author a baseline from a file, no live pull needed
 panos-audit report      # pull, drift-check, and write a JSON run summary
@@ -134,6 +137,13 @@ distinct status from **DRIFT**, since there's nothing to compare against — wit
 pointer to `promote`. `promote` shows the exact diff and waits for an interactive
 `y/N` before it writes; there is **no `--yes` flag, by design**. Exit codes: `0`
 promoted or already in sync, `1` drift shown but declined, `2` no backup to promote.
+
+`audit` is the security layer on top of the drift pipeline: drift asks "did this
+firewall change from its approved state?", audit asks "is the state itself risky?"
+A rulebase can be perfectly in sync with its baseline and still contain an any/any
+allow rule someone approved during an incident. Like `diff`, it's file-only (audits
+the on-disk backups; run `backup` first) and exits `1` when it finds something. The
+implemented and planned checks are documented in [AUDIT-CHECKS.md](AUDIT-CHECKS.md).
 
 **Why is there no `push`?** netmiko-config-audit can push a baseline back onto a
 Cisco device because IOS config is imperative line replay. PAN-OS is different:
@@ -180,6 +190,8 @@ pytest tests/ -q
 - [x] NO BASELINE vs DRIFT distinction in `diff`/`report` (the netmiko lesson: a first-ever diff with no baseline looks like broken drift detection otherwise)
 - [x] CLAUDE.md — architecture rules for AI-assisted edits, mirroring the sibling repo
 - [ ] `push`-equivalent via PAN-OS candidate-config + commit semantics — **deliberately deferred pending its own design**, not transliterated from IOS line replay
+- [x] Rulebase security audit — `panos-audit audit` + the check framework in `audit.py`; first two checks implemented (overly-permissive-rule, logging-disabled), remaining checks specced in [AUDIT-CHECKS.md](AUDIT-CHECKS.md) (offline-tested)
+- [ ] Remaining audit checks per [AUDIT-CHECKS.md](AUDIT-CHECKS.md): disabled-rule-hygiene, shadowed-rule, broad-service-object, mgmt-plane-settings (the last gated on a real config export)
 - [ ] Rule-level drift summaries (which specific security rule changed, not just a raw XML diff) — likely needs PAN-OS's structured rulebase API endpoints instead of a raw config dump
 - [ ] Scheduled nightly run
 - [ ] Tie into the existing [network-observability](https://github.com/stefcharreed/network-observability) Prometheus/Grafana stack — surface drift status as a metric
