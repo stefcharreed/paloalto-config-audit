@@ -476,7 +476,8 @@ def _cmd_audit(cfg) -> int:
         )
         if findings:
             per_device[device.name] = findings
-            worst = "high" if any(f.severity == "high" for f in findings) else "medium"
+            severities = {f.severity for f in findings}
+            worst = next(s for s in ("high", "medium", "low") if s in severities)
             style = _SEVERITY_STYLE[worst]
             table.add_row(device.name, f"[{style}]{len(findings)} FINDING(S)[/{style}]")
         else:

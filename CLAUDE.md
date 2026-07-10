@@ -55,7 +55,11 @@ and which shared rules are load-bearing.
   any of those. In logging-disabled, absent `<log-end>` defaults to YES and
   must never fire (PAN-OS omits defaulted elements), and its text comparison
   strips whitespace (pretty-printed exports render `\n  no\n`; exact equality
-  would false-negative) — both are pinned by tests. NO BACKUP renders distinctly from clean, same reasoning as
+  would false-negative) — both are pinned by tests. shadowed-rule is
+  **name-level only in v1** (no address-object resolution — under-reports,
+  never invents) and disabled rules neither shadow nor get flagged there;
+  disabled-rule-hygiene owns disabled rules outright, which is WHY every
+  other check skips them. NO BACKUP renders distinctly from clean, same reasoning as
   diff's NO BASELINE.
 - **`report` does not write backups** — it pulls, drift-checks, and writes the
   JSON summary. Backups are `backup`'s job.

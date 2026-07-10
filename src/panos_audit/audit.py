@@ -154,10 +154,92 @@ def check_logging_disabled(device: str, rules: list[ET.Element]) -> list[Finding
     return findings
 
 
+def check_disabled_rule_hygiene(device: str, rules: list[ET.Element]) -> list[Finding]:
+    """Flag disabled rules. Each one is policy a click away from being live
+    again with no change control, and dead entries make the rulebase harder
+    to review. Severity low: it passes no traffic today — this is hygiene,
+    not exposure. The other checks skip disabled rules precisely because this
+    one owns them.
+    """
+    findings: list[Finding] = []
+    for rule in rules:
+        if not _is_disabled(rule):
+            continue
+        name = rule.get("name") or "<unnamed>"
+        findings.append(
+            Finding(
+                device=device,
+                check="disabled-rule-hygiene",
+                severity="low",
+                rule=name,
+                detail=(
+                    f"rule '{name}' is disabled — one click re-enables it outside "
+                    f"change control; delete it or record why it stays"
+                ),
+            )
+        )
+    return findings
+
+
+_MATCH_FIELDS = ("from", "to", "source", "destination", "service", "application")
+
+
+def _field_covers(a: ET.Element, b: ET.Element, field: str) -> bool:
+    """True if rule a's `field` matches everything rule b's `field` matches —
+    name-level only: 'any' covers all, otherwise b's members must be a subset
+    of a's. Deliberately no address-object/group resolution in v1 (see
+    AUDIT-CHECKS.md) — names that differ are treated as disjoint, which can
+    only under-report shadowing, never invent it.
+    """
+    a_members = set(_members(a, field))
+    if "any" in a_members:
+        return True
+    return set(_members(b, field)) <= a_members
+
+
+def check_shadowed_rule(device: str, rules: list[ET.Element]) -> list[Finding]:
+    """Flag rules that can never match: an earlier enabled rule already
+    matches everything they would (every match field covered). Security
+    policy is first-match top-down, so a fully-covered later rule is dead
+    policy — usually the 2 a.m. emergency rule was inserted ABOVE the
+    specific rule it now shadows.
+
+    Disabled rules neither shadow nor count as shadowed — they're not in the
+    match path (disabled-rule-hygiene owns them). One finding per shadowed
+    rule, naming its earliest shadower. Severity medium: nothing extra is
+    passed, but the rulebase actively misleads whoever reads it — and if the
+    shadower is ever removed, the dead rule silently comes to life.
+    """
+    findings: list[Finding] = []
+    enabled = [r for r in rules if not _is_disabled(r)]
+    for position, rule in enumerate(enabled):
+        for earlier in enabled[:position]:
+            if all(_field_covers(earlier, rule, f) for f in _MATCH_FIELDS):
+                name = rule.get("name") or "<unnamed>"
+                earlier_name = earlier.get("name") or "<unnamed>"
+                findings.append(
+                    Finding(
+                        device=device,
+                        check="shadowed-rule",
+                        severity="medium",
+                        rule=name,
+                        detail=(
+                            f"rule '{name}' can never match — '{earlier_name}' earlier "
+                            f"in the rulebase already matches everything it would; "
+                            f"remove it or move it above '{earlier_name}'"
+                        ),
+                    )
+                )
+                break
+    return findings
+
+
 # Registry: audit_config() runs these in order. Add new checks here.
 CHECKS = [
     check_overly_permissive,
     check_logging_disabled,
+    check_shadowed_rule,
+    check_disabled_rule_hygiene,
 ]
 
 
