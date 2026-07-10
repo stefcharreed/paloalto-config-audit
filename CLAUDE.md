@@ -11,11 +11,11 @@ and which shared rules are load-bearing.
 - Test: `pytest tests/ -q` — expect **all passing**; the suite needs no network,
   no live firewall, no API key.
 - Lint: `ruff check src/ tests/` (config in `pyproject.toml`) — enforced in CI.
-- CLI: `panos-audit backup [DEVICE] | diff | promote <DEVICE> |
+- CLI: `panos-audit backup [DEVICE] | diff | audit | promote <DEVICE> |
   set-baseline <DEVICE> <FILE> | report | configure`
 
 ## Layout
-- `src/panos_audit/` — inventory, collector, normalize, drift, gitstore,
+- `src/panos_audit/` — inventory, collector, normalize, drift, audit, gitstore,
   promote, set_baseline, report, sanitize_check, cli.
 - `tests/` — pytest; sanitized XML fixtures in `tests/fixtures/` (every one
   must pass `python -m panos_audit.sanitize_check` — CI enforces this via
@@ -46,6 +46,14 @@ and which shared rules are load-bearing.
 - **`diff` is file-only** (on-disk backups vs. baselines) — no live pull, no
   credentials. The lifecycle is `backup → diff → promote`; promote operates on
   the ON-DISK backup you reviewed, never a fresh pull (no TOCTOU gap).
+- **`audit` is file-only and check-registry-driven** (AUDIT-CHECKS.md is the
+  spec; `check_overly_permissive` is the worked example every new check
+  follows). Check slugs are stable once shipped — reports key off them. An
+  any/any **deny** never fires the permissive check (it's the normal cleanup
+  rule), disabled rules never fire it (they pass no traffic), and an
+  unparseable config is a high-severity finding, never "clean" — don't relax
+  any of those. NO BACKUP renders distinctly from clean, same reasoning as
+  diff's NO BASELINE.
 - **`report` does not write backups** — it pulls, drift-checks, and writes the
   JSON summary. Backups are `backup`'s job.
 - **Every interactive wizard checks `_interactive()` first** (load-bearing,
