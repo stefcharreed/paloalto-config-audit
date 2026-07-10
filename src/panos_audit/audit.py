@@ -110,9 +110,38 @@ def check_overly_permissive(device: str, rules: list[ET.Element]) -> list[Findin
     return findings
 
 
+def check_logging_disabled(device: str, rules: list[ET.Element]) -> list[Finding]:
+    """SCAFFOLD — spec in AUDIT-CHECKS.md (logging-disabled); tests already
+    written in tests/test_audit.py (skip-marked). To finish: implement the body,
+    add this function to CHECKS below, remove the skip marker, run pytest.
+
+    Flag enabled allow rules with <log-end>no</log-end> — traffic they pass
+    leaves no session-end log, which is exactly what incident response needs.
+
+    THE TRAP: PAN-OS omits elements at their default, and log-end defaults to
+    YES — so an ABSENT <log-end> element means logging is fine and must NOT
+    fire. Detect `findtext("./log-end") == "no"` (findtext returns None when
+    absent, which never equals "no"). Flagging absence would fire on nearly
+    every rule and drown the audit in noise.
+
+    Severity medium: the rule passes no extra traffic; it blinds you to the
+    traffic it already passes. check slug: "logging-disabled" (stable once
+    shipped). Skip disabled rules and non-allow actions, same reasoning as
+    check_overly_permissive.
+    """
+    findings: list[Finding] = []
+    # TODO(stefan): iterate `rules`; for each rule:
+    #   1) skip disabled rules (_is_disabled) and non-allow actions
+    #   2) fire only when log-end is PRESENT with text "no"
+    #   3) append a Finding(check="logging-disabled", severity="medium",
+    #      rule=<name>, detail=<one actionable line>)
+    return findings
+
+
 # Registry: audit_config() runs these in order. Add new checks here.
 CHECKS = [
     check_overly_permissive,
+    # TODO(stefan): register check_logging_disabled once implemented
 ]
 
 
