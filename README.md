@@ -4,7 +4,7 @@
 
 A Python tool that pulls PAN-OS/Panorama configuration over the PAN-OS API, version-controls it in git, and flags configuration drift against a per-device baseline — the same drift-detection pattern as [netmiko-config-audit](https://github.com/stefcharreed/netmiko-config-audit), applied to firewall policy instead of Cisco IOS.
 
-> **Status:** 🚧 Offline pipeline complete — collector, normalize, drift, git backend, promote/set-baseline, the configure + first-run wizards, and the CLI covered by a 105-test suite against sanitized fixtures, with lint + tests in CI (Python 3.10–3.12). **Not yet validated against a real firewall or Panorama instance** — that's the gate before anything here is called "working." See [Roadmap](#roadmap), [THREAT-MODEL.md](THREAT-MODEL.md), and [COMPARISON.md](COMPARISON.md) for the same-bar gap analysis against [netmiko-config-audit](https://github.com/stefcharreed/netmiko-config-audit).
+> **Status:** 🚧 Offline pipeline complete — collector, normalize, drift, git backend, promote/set-baseline, the configure + first-run wizards, and the CLI covered by a 118-test suite against sanitized fixtures, with lint + tests in CI (Python 3.10–3.12). **Not yet validated against a real firewall or Panorama instance** — that's the gate before anything here is called "working." See [Roadmap](#roadmap), [THREAT-MODEL.md](THREAT-MODEL.md), and [COMPARISON.md](COMPARISON.md) for the same-bar gap analysis against [netmiko-config-audit](https://github.com/stefcharreed/netmiko-config-audit).
 
 ## Overview
 
