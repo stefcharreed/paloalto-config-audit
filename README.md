@@ -190,8 +190,8 @@ pytest tests/ -q
 - [x] NO BASELINE vs DRIFT distinction in `diff`/`report` (the netmiko lesson: a first-ever diff with no baseline looks like broken drift detection otherwise)
 - [x] CLAUDE.md — architecture rules for AI-assisted edits, mirroring the sibling repo
 - [ ] `push`-equivalent via PAN-OS candidate-config + commit semantics — **deliberately deferred pending its own design**, not transliterated from IOS line replay
-- [x] Rulebase security audit — `panos-audit audit` + the check framework in `audit.py`; four checks implemented (overly-permissive-rule, logging-disabled, shadowed-rule, disabled-rule-hygiene), remaining checks specced in [AUDIT-CHECKS.md](AUDIT-CHECKS.md) (offline-tested)
-- [ ] Remaining audit checks per [AUDIT-CHECKS.md](AUDIT-CHECKS.md): broad-service-object, mgmt-plane-settings (the latter gated on a real config export)
+- [x] Rulebase security audit — `panos-audit audit` + the check framework in `audit.py`; five checks implemented (overly-permissive-rule, logging-disabled, shadowed-rule, disabled-rule-hygiene, broad-service-object), remaining checks specced in [AUDIT-CHECKS.md](AUDIT-CHECKS.md) (offline-tested)
+- [ ] Remaining audit checks per [AUDIT-CHECKS.md](AUDIT-CHECKS.md): mgmt-plane-settings (gated on a real config export)
 - [ ] Rule-level drift summaries (which specific security rule changed, not just a raw XML diff) — likely needs PAN-OS's structured rulebase API endpoints instead of a raw config dump
 - [ ] Scheduled nightly run
 - [ ] Tie into the existing [network-observability](https://github.com/stefcharreed/network-observability) Prometheus/Grafana stack — surface drift status as a metric

@@ -1,9 +1,11 @@
 """Rulebase audit checks against the committed fixtures.
 
 The drift fixture doubles as the audit's true-positive case: its
-temp-emergency-access rule is a literal any/any/any/any allow. The baseline
-fixture is the true-negative case — its any/any rule is the deny-all cleanup
-rule, which must NOT fire the permissive check.
+temp-emergency-access rule is a literal any/any/any/any allow, and its
+allow-web rule is a service-any-with-scoped-app (broad-service-object, low).
+The baseline fixture is the true-negative case — its any/any rule is the
+deny-all cleanup rule, which must NOT fire the permissive check, and its
+allow-web pins service-https.
 """
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -11,11 +13,13 @@ from pathlib import Path
 from panos_audit.audit import (
     Finding,
     audit_config,
+    check_broad_service_object,
     check_disabled_rule_hygiene,
     check_logging_disabled,
     check_overly_permissive,
     check_shadowed_rule,
     iter_security_rules,
+    iter_service_objects,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -31,13 +35,16 @@ def test_clean_rulebase_yields_no_findings():
     assert audit_config("fw1", BASELINE) == []
 
 
-def test_any_any_allow_is_flagged_high():
+def test_drift_fixture_findings_are_exactly_these():
+    """The drift fixture carries two audit-relevant shapes: the any/any/any/any
+    temp-emergency-access allow (overly-permissive, high) and allow-web's
+    service-any-with-scoped-app (broad-service-object, low). Pinning the full
+    list keeps a new check from silently changing what this fixture means."""
     findings = audit_config("fw1", DRIFTED)
-    assert len(findings) == 1
-    f = findings[0]
-    assert f.check == "overly-permissive-rule"
-    assert f.rule == "temp-emergency-access"
-    assert f.severity == "high"  # service AND application are also any
+    assert [(f.check, f.rule, f.severity) for f in findings] == [
+        ("overly-permissive-rule", "temp-emergency-access", "high"),
+        ("broad-service-object", "allow-web", "low"),
+    ]
 
 
 def test_any_any_deny_does_not_fire():
@@ -407,3 +414,194 @@ def test_panorama_pre_rulebase_rules_are_found():
     </entry></device-group></entry></devices></config>"""
     findings = audit_config("pano", config)
     assert [f.rule for f in findings] == ["dg-allow-all"]
+
+
+# --- broad-service-object ----------------------------------------------------
+
+def _svc(name: str, port: str) -> ET.Element:
+    """A custom service object as it renders in the config's service section."""
+    return ET.fromstring(
+        f"""<entry name="{name}">
+              <protocol><tcp><port>{port}</port></tcp></protocol>
+            </entry>"""
+    )
+
+
+BROAD_REF_RULE = """<entry name="just-make-it-work">
+     <from><member>trust</member></from><to><member>dmz</member></to>
+     <source><member>branch-lan</member></source>
+     <destination><member>web-srv-1</member></destination>
+     <service><member>tcp-all</member></service>
+     <application><member>any</member></application>
+     <action>allow</action>
+   </entry>"""
+
+
+def test_service_any_with_scoped_apps_flags_low():
+    rule = _rule(
+        """<entry name="app-id-only">
+             <source><member>branch-lan</member></source>
+             <destination><member>web-srv-1</member></destination>
+             <service><member>any</member></service>
+             <application><member>web-browsing</member><member>ssl</member></application>
+             <action>allow</action>
+           </entry>"""
+    )
+    findings = check_broad_service_object("fw1", [rule], [])
+    assert [(f.check, f.severity, f.rule) for f in findings] == [
+        ("broad-service-object", "low", "app-id-only")
+    ]
+
+
+def test_service_any_with_application_any_does_not_fire():
+    """Not this check's finding: with any endpoints that rule is
+    overly-permissive-rule's high; with scoped endpoints it's a logged v1
+    gap (AUDIT-CHECKS.md, Later) — 'a scoped app list' is the spec's clause,
+    and application any is not one."""
+    rule = _rule(
+        """<entry name="scoped-endpoints-any-everything">
+             <source><member>branch-lan</member></source>
+             <destination><member>web-srv-1</member></destination>
+             <service><member>any</member></service>
+             <application><member>any</member></application>
+             <action>allow</action>
+           </entry>"""
+    )
+    assert check_broad_service_object("fw1", [rule], []) == []
+
+
+def test_application_default_service_does_not_fire():
+    """application-default is the FIX this check recommends — it's a keyword,
+    not a config object, so it can never appear in the span map."""
+    rule = _rule(
+        """<entry name="pinned-to-app-default">
+             <source><member>branch-lan</member></source>
+             <destination><member>web-srv-1</member></destination>
+             <service><member>application-default</member></service>
+             <application><member>web-browsing</member></application>
+             <action>allow</action>
+           </entry>"""
+    )
+    assert check_broad_service_object("fw1", [rule], []) == []
+
+
+def test_broad_custom_object_on_enabled_allow_flags_medium():
+    findings = check_broad_service_object(
+        "fw1", [_rule(BROAD_REF_RULE)], [_svc("tcp-all", "0-65535")]
+    )
+    assert [(f.severity, f.rule) for f in findings] == [("medium", "just-make-it-work")]
+    assert "'tcp-all'" in findings[0].detail
+    assert "65536 ports" in findings[0].detail
+
+
+def test_port_span_boundary_100_does_not_fire_101_does():
+    """The threshold is STRICTLY greater than 100 ports — a 100-port range is
+    the largest span that stays quiet."""
+    at_limit = check_broad_service_object(
+        "fw1",
+        [_rule(BROAD_REF_RULE.replace("tcp-all", "svc-100"))],
+        [_svc("svc-100", "8000-8099")],
+    )
+    over_limit = check_broad_service_object(
+        "fw1",
+        [_rule(BROAD_REF_RULE.replace("tcp-all", "svc-101"))],
+        [_svc("svc-101", "8000-8100")],
+    )
+    assert at_limit == []
+    assert [f.severity for f in over_limit] == ["medium"]
+
+
+def test_comma_separated_port_list_spans_sum():
+    """PAN-OS port values can be lists: '80,443,1000-1200' covers 203 ports."""
+    findings = check_broad_service_object(
+        "fw1",
+        [_rule(BROAD_REF_RULE.replace("tcp-all", "svc-list"))],
+        [_svc("svc-list", "80,443,1000-1200")],
+    )
+    assert len(findings) == 1
+    assert "203 ports" in findings[0].detail
+
+
+def test_broad_object_on_deny_rule_does_not_fire():
+    """A deny can be as wide as it likes — width is only risk on allows."""
+    rule = _rule(BROAD_REF_RULE.replace("allow", "deny"))
+    assert check_broad_service_object("fw1", [rule], [_svc("tcp-all", "0-65535")]) == []
+
+
+def test_broad_object_on_disabled_rule_does_not_fire():
+    rule = _rule(
+        BROAD_REF_RULE.replace("<action>allow</action>",
+                               "<action>allow</action><disabled>yes</disabled>")
+    )
+    assert check_broad_service_object("fw1", [rule], [_svc("tcp-all", "0-65535")]) == []
+
+
+def test_unreferenced_broad_object_does_not_fire():
+    """A broad object no enabled allow rule uses passes no traffic — unused
+    object hygiene is not rule risk (and not this check)."""
+    rule = _rule(
+        """<entry name="tight-rule">
+             <source><member>branch-lan</member></source>
+             <destination><member>web-srv-1</member></destination>
+             <service><member>svc-narrow</member></service>
+             <application><member>web-browsing</member></application>
+             <action>allow</action>
+           </entry>"""
+    )
+    services = [_svc("tcp-all", "0-65535"), _svc("svc-narrow", "8443")]
+    assert check_broad_service_object("fw1", [rule], services) == []
+
+
+def test_predefined_service_reference_does_not_fire():
+    """service-http/service-https are predefined — they never appear in the
+    config's service section, so a rule pinned to them stays quiet."""
+    rule = _rule(BROAD_REF_RULE.replace("tcp-all", "service-https"))
+    assert check_broad_service_object("fw1", [rule], []) == []
+
+
+def test_malformed_port_text_never_fires_or_raises():
+    """Unparseable port values count zero — under-reporting a weird value
+    beats inventing a finding from it (shadowed-rule's stance)."""
+    services = [
+        _svc("svc-weird", "high-ports"),
+        _svc("svc-empty", ""),
+        _svc("svc-backwards", "9000-8000"),
+    ]
+    rules = [
+        _rule(BROAD_REF_RULE.replace("tcp-all", name))
+        for name in ("svc-weird", "svc-empty", "svc-backwards")
+    ]
+    assert check_broad_service_object("fw1", rules, services) == []
+
+
+def test_rule_service_fields_are_not_picked_up_as_service_objects():
+    """The XPath trap: a rule's <service> holds <member> references; a service
+    OBJECT is an <entry> under a service section. iter_service_objects must
+    return only the latter, or every rule's service field becomes a phantom
+    zero-span object."""
+    config = f"""<config><devices><entry name="fw"><vsys><entry name="vsys1">
+        <service>
+          <entry name="tcp-all"><protocol><tcp><port>0-65535</port></tcp></protocol></entry>
+        </service>
+        <rulebase><security><rules>
+          {BROAD_REF_RULE}
+        </rules></security></rulebase>
+    </entry></vsys></entry></devices></config>"""
+    objects = iter_service_objects(config)
+    assert [e.get("name") for e in objects] == ["tcp-all"]
+
+
+def test_broad_service_object_reachable_via_audit_config():
+    """audit_config() must hand the check its service objects end-to-end —
+    a check invoked explicitly (not via CHECKS) is the easiest one to forget
+    to wire."""
+    config = f"""<config><devices><entry name="fw"><vsys><entry name="vsys1">
+        <service>
+          <entry name="tcp-all"><protocol><tcp><port>0-65535</port></tcp></protocol></entry>
+        </service>
+        <rulebase><security><rules>
+          {BROAD_REF_RULE}
+        </rules></security></rulebase>
+    </entry></vsys></entry></devices></config>"""
+    findings = audit_config("fw1", config)
+    assert [(f.check, f.severity) for f in findings] == [("broad-service-object", "medium")]

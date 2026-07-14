@@ -16,7 +16,10 @@ check follows its shape:
 2. Give it a stable kebab-case `check` slug — reports and future tooling key
    off it, so it never changes once shipped.
 3. Append the function to the `CHECKS` registry. Nothing else changes —
-   `audit_config()` and the CLI pick it up automatically.
+   `audit_config()` and the CLI pick it up automatically. A check that needs
+   config sections beyond the rulebase takes them as extra arguments and is
+   invoked explicitly in `audit_config()` instead (`check_broad_service_object`
+   is the worked example of that variant, with its own extraction helper).
 4. Tests in `tests/test_audit.py`: a true-positive, a true-negative (the case
    that *looks* like the finding but isn't — this is what keeps the audit
    quiet enough to trust), and any state-handling edge (disabled, missing
@@ -72,21 +75,30 @@ the rulebase harder to review. Owns disabled rules outright — the other checks
 skip them for exactly this reason. True-negatives pinned: absent `<disabled>`
 and explicit `<disabled>no</disabled>` never fire.
 
+### broad-service-object
+Enabled `allow` rule whose service term is effectively unbounded, two shapes:
+`service` = `any` with a scoped application list → `low` (App-ID still narrows
+what passes, but the rule trusts identification alone instead of pinning
+ports — `application-default` is the fix, and as a keyword, not a config
+object, it never fires); a referenced custom service object spanning **more
+than 100 ports** (port values parsed as `80`, `0-65535`, `80,443,1000-1200`)
+→ `medium`. One finding per (rule, object) pair. First check that reads
+outside the rulebase: `audit_config()` hands it `iter_service_objects()`
+output alongside the rules, invoked explicitly rather than via the CHECKS
+registry. Deny and disabled rules never fire; unreferenced broad objects
+never fire (unused-object hygiene is not rule risk). **Name-level only,**
+like shadowed-rule: service groups aren't expanded and predefined services
+never appear in the config's service section — both can only under-report,
+never invent. Malformed port values count zero ports, same stance. The
+strictly-greater-than-100 boundary is test-pinned (100 quiet, 101 fires).
+- **Later:** expand `<service-group>` membership so a broad object hidden
+  behind a group is caught; `service any` + `application any` on scoped
+  endpoints (today it falls between this check and overly-permissive-rule,
+  which requires any/any endpoints).
+
 ## Planned — build these next, in this order
 
-### 1. broad-service-object  (severity: medium)
-Rules that allow `application-default`-bypassing wide service ranges — e.g. a
-custom service object spanning huge port ranges, or `service` = `any` with a
-scoped app list (app-id still narrows it, hence medium at most).
-- **Detect (v1):** enabled allow rule with `service` = `any` and
-  `application` ≠ `any` → `low`; custom `<service>` objects in the config whose
-  `<port>` spans > 100 ports (parse `<port>0-65535</port>` style values) and
-  are referenced by an enabled allow rule → `medium`.
-- This is the first check that reads config sections *outside* the rulebase —
-  it needs a second extraction helper (`iter_service_objects`), same pattern
-  as `iter_security_rules`.
-
-### 2. mgmt-plane-settings  (severity: high)
+### 1. mgmt-plane-settings  (severity: high)
 Management-plane weaknesses live under `<deviceconfig><system>` /
 `<service>`, not the rulebase: HTTP or telnet management enabled, SNMP v2c
 communities, no login banner.
