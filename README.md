@@ -4,7 +4,7 @@
 
 A Python tool that pulls PAN-OS/Panorama configuration over the PAN-OS API, version-controls it in git, and flags configuration drift against a per-device baseline — the same drift-detection pattern as [netmiko-config-audit](https://github.com/stefcharreed/netmiko-config-audit), applied to firewall policy instead of Cisco IOS.
 
-> **Status:** 🚧 Offline pipeline complete — collector, normalize, drift, git backend, promote/set-baseline, the configure + first-run wizards, and the CLI covered by a 105-test suite against sanitized fixtures, with lint + tests in CI (Python 3.10–3.12). **Not yet validated against a real firewall or Panorama instance** — that's the gate before anything here is called "working." See [Roadmap](#roadmap), [THREAT-MODEL.md](THREAT-MODEL.md), and [COMPARISON.md](COMPARISON.md) for the same-bar gap analysis against [netmiko-config-audit](https://github.com/stefcharreed/netmiko-config-audit).
+> **Status:** 🚧 Offline pipeline complete — collector, normalize, drift, git backend, promote/set-baseline, the configure + first-run wizards, and the CLI covered by a 118-test suite against sanitized fixtures, with lint + tests in CI (Python 3.10–3.12). **Not yet validated against a real firewall or Panorama instance** — that's the gate before anything here is called "working." See [Roadmap](#roadmap), [THREAT-MODEL.md](THREAT-MODEL.md), and [COMPARISON.md](COMPARISON.md) for the same-bar gap analysis against [netmiko-config-audit](https://github.com/stefcharreed/netmiko-config-audit).
 
 ## Overview
 
@@ -190,8 +190,8 @@ pytest tests/ -q
 - [x] NO BASELINE vs DRIFT distinction in `diff`/`report` (the netmiko lesson: a first-ever diff with no baseline looks like broken drift detection otherwise)
 - [x] CLAUDE.md — architecture rules for AI-assisted edits, mirroring the sibling repo
 - [ ] `push`-equivalent via PAN-OS candidate-config + commit semantics — **deliberately deferred pending its own design**, not transliterated from IOS line replay
-- [x] Rulebase security audit — `panos-audit audit` + the check framework in `audit.py`; four checks implemented (overly-permissive-rule, logging-disabled, shadowed-rule, disabled-rule-hygiene), remaining checks specced in [AUDIT-CHECKS.md](AUDIT-CHECKS.md) (offline-tested)
-- [ ] Remaining audit checks per [AUDIT-CHECKS.md](AUDIT-CHECKS.md): broad-service-object, mgmt-plane-settings (the latter gated on a real config export)
+- [x] Rulebase security audit — `panos-audit audit` + the check framework in `audit.py`; five checks implemented (overly-permissive-rule, logging-disabled, shadowed-rule, disabled-rule-hygiene, broad-service-object), remaining checks specced in [AUDIT-CHECKS.md](AUDIT-CHECKS.md) (offline-tested)
+- [ ] Remaining audit checks per [AUDIT-CHECKS.md](AUDIT-CHECKS.md): mgmt-plane-settings (gated on a real config export)
 - [ ] Rule-level drift summaries (which specific security rule changed, not just a raw XML diff) — likely needs PAN-OS's structured rulebase API endpoints instead of a raw config dump
 - [ ] Scheduled nightly run
 - [ ] Tie into the existing [network-observability](https://github.com/stefcharreed/network-observability) Prometheus/Grafana stack — surface drift status as a metric

@@ -13,8 +13,11 @@ Check registry pattern: each check is a function
     (device_name, rules) -> list[Finding]
 registered in CHECKS. `audit_config()` parses once and runs every registered
 check. To add a check, write the function and add it to CHECKS — nothing else
-changes. AUDIT-CHECKS.md specs the checks planned but not yet implemented;
-`check_overly_permissive` below is the worked example they should follow.
+changes. Checks that read config sections beyond the rulebase take those as
+extra arguments and are invoked explicitly in audit_config() instead —
+`check_broad_service_object` is the first. AUDIT-CHECKS.md specs the checks
+planned but not yet implemented; `check_overly_permissive` below is the worked
+example they should follow.
 
 Rule extraction uses `.//security/rules/entry`, which matches a firewall's
 `rulebase`, and Panorama's `pre-rulebase`/`post-rulebase` — all three carry
@@ -62,6 +65,21 @@ def iter_security_rules(config_text: str) -> list[ET.Element]:
     """
     root = ET.fromstring(config_text)
     return root.findall(".//security/rules/entry")
+
+
+def iter_service_objects(config_text: str) -> list[ET.Element]:
+    """Parse `config_text` and return every service-object <entry> — vsys,
+    shared, and device-group scopes all render service objects as
+    <service><entry name=...>.
+
+    The XPath trap: a RULE's <service> field holds <member> references, not
+    <entry> children, so `.//service/entry` never picks up rule fields.
+    Service GROUPS (<service-group>) are deliberately not expanded in v1 —
+    a broad object hidden behind a group is a known under-report, tracked
+    in AUDIT-CHECKS.md.
+    """
+    root = ET.fromstring(config_text)
+    return root.findall(".//service/entry")
 
 
 def check_overly_permissive(device: str, rules: list[ET.Element]) -> list[Finding]:
@@ -234,7 +252,112 @@ def check_shadowed_rule(device: str, rules: list[ET.Element]) -> list[Finding]:
     return findings
 
 
-# Registry: audit_config() runs these in order. Add new checks here.
+_BROAD_PORT_SPAN = 100  # spans strictly greater than this are "broad"
+
+
+def _port_span(port_text: str) -> int:
+    """Number of ports a <port> value covers: '80' -> 1, '0-65535' -> 65536,
+    '80,443,1000-1200' -> 203. Malformed tokens count zero — under-reporting
+    a value we can't parse beats inventing a finding from it (same stance as
+    shadowed-rule's name-only matching).
+    """
+    span = 0
+    for token in port_text.split(","):
+        token = token.strip()
+        low, is_range, high = token.partition("-")
+        try:
+            if is_range:
+                start, end = int(low), int(high)
+                if end >= start:
+                    span += end - start + 1
+            else:
+                int(token)
+                span += 1
+        except ValueError:
+            continue
+    return span
+
+
+def check_broad_service_object(
+    device: str, rules: list[ET.Element], services: list[ET.Element]
+) -> list[Finding]:
+    """Flag enabled allow rules whose service term is effectively unbounded.
+
+    Two shapes (per AUDIT-CHECKS.md v1):
+    - service 'any' with a scoped application list -> low. App-ID still
+      narrows what passes, but the rule trusts identification alone instead
+      of pinning ports; 'application-default' is the fix, and being a
+      keyword — not a config object — it never fires this check.
+    - the rule references a custom service object spanning more than
+      _BROAD_PORT_SPAN ports -> medium. The 2 a.m. shape is
+      <port>0-65535</port> created to "just make it work". One finding per
+      (rule, object) pair — each names the object and its span.
+
+    First check that reads outside the rulebase: audit_config() hands it
+    iter_service_objects() output alongside the rules, so it's invoked
+    explicitly there rather than through the CHECKS registry. Name-level
+    like shadowed-rule: groups aren't expanded, and predefined services
+    (service-http/-https) never appear in the config's service section, so
+    neither can fire — both can only under-report, never invent. service
+    'any' WITH application 'any' is not this check's finding: on any/any
+    endpoints that's overly-permissive-rule's high; on scoped endpoints
+    it's a logged v1 gap (AUDIT-CHECKS.md, Later).
+    """
+    spans: dict[str, int] = {}
+    for obj in services:
+        obj_name = obj.get("name")
+        if obj_name:
+            spans[obj_name] = sum(
+                _port_span(port.text or "") for port in obj.findall(".//port")
+            )
+
+    findings: list[Finding] = []
+    for rule in rules:
+        if rule.findtext("./action", default="") != "allow" or _is_disabled(rule):
+            continue
+        name = rule.get("name") or "<unnamed>"
+        service_members = _members(rule, "service")
+        applications = _members(rule, "application")
+
+        if service_members == ["any"]:
+            if applications and applications != ["any"]:
+                findings.append(
+                    Finding(
+                        device=device,
+                        check="broad-service-object",
+                        severity="low",
+                        rule=name,
+                        detail=(
+                            f"allow rule '{name}' uses service any with a scoped "
+                            f"application list — App-ID narrows it, but pin the "
+                            f"ports (application-default or an explicit service)"
+                        ),
+                    )
+                )
+            continue
+
+        for svc in service_members:
+            span = spans.get(svc, 0)
+            if span > _BROAD_PORT_SPAN:
+                findings.append(
+                    Finding(
+                        device=device,
+                        check="broad-service-object",
+                        severity="medium",
+                        rule=name,
+                        detail=(
+                            f"allow rule '{name}' references service object "
+                            f"'{svc}' spanning {span} ports — scope it to the "
+                            f"ports the application actually needs"
+                        ),
+                    )
+                )
+    return findings
+
+
+# Registry: audit_config() runs these in order. Add new rule-level checks here;
+# checks needing config sections beyond the rulebase (broad-service-object) are
+# invoked explicitly in audit_config() with their extra inputs.
 CHECKS = [
     check_overly_permissive,
     check_logging_disabled,
@@ -270,7 +393,11 @@ def audit_config(device_name: str, config_text: str) -> list[Finding]:
             )
         ]
 
+    # iter_security_rules just parsed this same text, so this cannot raise here.
+    services = iter_service_objects(config_text)
+
     findings: list[Finding] = []
     for check in CHECKS:
         findings.extend(check(device_name, rules))
+    findings.extend(check_broad_service_object(device_name, rules, services))
     return findings

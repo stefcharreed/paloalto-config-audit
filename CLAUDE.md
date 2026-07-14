@@ -48,7 +48,9 @@ and which shared rules are load-bearing.
   the ON-DISK backup you reviewed, never a fresh pull (no TOCTOU gap).
 - **`audit` is file-only and check-registry-driven** (AUDIT-CHECKS.md is the
   spec; `check_overly_permissive` is the worked example every new check
-  follows). Check slugs are stable once shipped — reports key off them. An
+  follows; checks needing config beyond the rulebase — broad-service-object —
+  take it as extra arguments and are invoked explicitly in `audit_config()`
+  instead). Check slugs are stable once shipped — reports key off them. An
   any/any **deny** never fires the permissive check (it's the normal cleanup
   rule), disabled rules never fire it (they pass no traffic), and an
   unparseable config is a high-severity finding, never "clean" — don't relax
