@@ -151,3 +151,12 @@ Fill in as you go; this table is the evidence the roadmap checkbox points at.
    hardware-validated yet" section to say what *was* validated, on what, and when.
 3. Anything that failed becomes an issue/fix — the offline suite gets a regression
    test shaped like the real-gear failure before the fix lands.
+4. **Harvest scenario fixtures while you have gear.** The committed fixtures cover
+   exactly one scenario (a direct-firewall export); production configs come in more
+   shapes than that. While connected, export and sanitize the variants the code
+   claims to handle but has no full-envelope fixture for — a Panorama device-group
+   config (pre-/post-rulebase), a multi-vsys config, and a config using the shared
+   location if available. Run each through `python -m panos_audit.sanitize_check`,
+   then commit them as fixtures with tests. Real exports beat invented ones: a
+   hand-authored "Panorama-shaped" fixture would just re-encode the same untested
+   assumptions this session exists to check.
