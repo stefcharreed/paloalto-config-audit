@@ -4,7 +4,7 @@
 
 A Python tool that pulls PAN-OS/Panorama configuration over the PAN-OS API, version-controls it in git, and flags configuration drift against a per-device baseline — the same drift-detection pattern as [netmiko-config-audit](https://github.com/stefcharreed/netmiko-config-audit), applied to firewall policy instead of Cisco IOS.
 
-> **Status:** 🚧 Offline pipeline complete — collector, normalize, drift, git backend, promote/set-baseline, the configure + first-run wizards, and the CLI covered by a 95-test suite against sanitized fixtures, with lint + tests in CI (Python 3.10–3.12). **Not yet validated against a real firewall or Panorama instance** — that's the gate before anything here is called "working." See [Roadmap](#roadmap), [THREAT-MODEL.md](THREAT-MODEL.md), and [COMPARISON.md](COMPARISON.md) for the same-bar gap analysis against [netmiko-config-audit](https://github.com/stefcharreed/netmiko-config-audit).
+> **Status:** 🚧 Offline pipeline complete — collector, normalize, drift, git backend, promote/set-baseline, the configure + first-run wizards, and the CLI covered by a 95-test suite against sanitized fixtures, with lint + tests in CI (Python 3.10–3.12). **Not yet validated against a real firewall or Panorama instance** — that's the gate before anything here is called "working"; [VALIDATION.md](VALIDATION.md) is the step-by-step runbook for that session. See [Roadmap](#roadmap), [THREAT-MODEL.md](THREAT-MODEL.md), and [COMPARISON.md](COMPARISON.md) for the same-bar gap analysis against [netmiko-config-audit](https://github.com/stefcharreed/netmiko-config-audit).
 
 ## Overview
 
@@ -182,7 +182,7 @@ pytest tests/ -q
 - [x] Sanitized PAN-OS-shaped XML fixtures (RFC 5737 IPs, fake names, zero secrets)
 - [x] CI: ruff + pytest on Python 3.10–3.12, `permissions: contents: read`, pinned actions
 - [x] SECURITY.md + THREAT-MODEL.md (assets, attackers, trust boundaries, dated accepted risks)
-- [ ] **Validate the collector against a real firewall or Panorama instance** — nothing below this line should be trusted as "working" until this happens (per the "validate against the real thing" rule — fixtures prove logic, real gear proves it works)
+- [ ] **Validate the collector against a real firewall or Panorama instance** — nothing below this line should be trusted as "working" until this happens (per the "validate against the real thing" rule — fixtures prove logic, real gear proves it works). Runbook: [VALIDATION.md](VALIDATION.md), including harvesting Panorama/multi-vsys scenario fixtures while connected
 - [x] Human-gated `promote` (approve a drifted config into the baseline) — ported from netmiko-config-audit; plan/apply split, y/N gate, exit codes 0/1/2 (offline-tested; not yet run against real gear)
 - [x] `set-baseline` — author a baseline from a file, no live pull needed (offline-tested)
 - [x] `configure` wizard + first-run API-key setup — repo-root-first flow with separate-repo/git-worktree validation, TTY detection for cron safety, dotenv-corruption-shape rejection (offline-tested)
