@@ -11,8 +11,10 @@ from pathlib import Path
 from panos_audit.audit import (
     Finding,
     audit_config,
+    check_disabled_rule_hygiene,
     check_logging_disabled,
     check_overly_permissive,
+    check_shadowed_rule,
     iter_security_rules,
 )
 
@@ -248,6 +250,146 @@ def test_unnamed_rule_gets_placeholder_not_none():
     assert len(findings) == 1
     assert findings[0].rule == "<unnamed>"
     assert "None" not in findings[0].detail
+
+
+# --- disabled-rule-hygiene -----------------------------------------------------
+
+def test_disabled_rule_is_flagged_low():
+    rule = _rule(
+        """<entry name="old-rule">
+             <source><member>branch-lan</member></source>
+             <destination><member>web-srv-1</member></destination>
+             <action>allow</action>
+             <disabled>yes</disabled>
+           </entry>"""
+    )
+    findings = check_disabled_rule_hygiene("fw1", [rule])
+    assert len(findings) == 1
+    assert findings[0].check == "disabled-rule-hygiene"
+    assert findings[0].severity == "low"
+    assert findings[0].rule == "old-rule"
+
+
+def test_enabled_rules_do_not_fire_hygiene():
+    """Neither an absent <disabled> element nor an explicit <disabled>no</disabled>
+    is a finding — only actually-disabled rules are."""
+    absent = _rule(
+        """<entry name="normal-rule">
+             <source><member>branch-lan</member></source>
+             <destination><member>web-srv-1</member></destination>
+             <action>allow</action>
+           </entry>"""
+    )
+    explicit_no = _rule(
+        """<entry name="explicit-enabled">
+             <source><member>branch-lan</member></source>
+             <destination><member>web-srv-1</member></destination>
+             <action>allow</action>
+             <disabled>no</disabled>
+           </entry>"""
+    )
+    assert check_disabled_rule_hygiene("fw1", [absent, explicit_no]) == []
+
+
+def test_disabled_any_any_allow_fires_hygiene_only():
+    """The checks divide the work: a disabled any/any allow is exactly one
+    hygiene finding — permissive/logging/shadow all skip disabled rules
+    because this check owns them."""
+    config = """<config><devices><entry name="fw"><vsys><entry name="vsys1">
+        <rulebase><security><rules>
+          <entry name="old-emergency">
+            <source><member>any</member></source>
+            <destination><member>any</member></destination>
+            <service><member>any</member></service>
+            <application><member>any</member></application>
+            <action>allow</action>
+            <log-end>no</log-end>
+            <disabled>yes</disabled>
+          </entry>
+        </rules></security></rulebase>
+    </entry></vsys></entry></devices></config>"""
+    findings = audit_config("fw1", config)
+    assert [f.check for f in findings] == ["disabled-rule-hygiene"]
+
+
+# --- shadowed-rule ---------------------------------------------------------------
+
+WIDE_OPEN = """<entry name="catch-everything">
+                 <from><member>any</member></from><to><member>any</member></to>
+                 <source><member>any</member></source>
+                 <destination><member>any</member></destination>
+                 <service><member>any</member></service>
+                 <application><member>any</member></application>
+                 <action>allow</action>
+               </entry>"""
+
+SPECIFIC = """<entry name="allow-web">
+                <from><member>untrust</member></from><to><member>trust</member></to>
+                <source><member>branch-lan</member></source>
+                <destination><member>web-srv-1</member></destination>
+                <service><member>service-https</member></service>
+                <application><member>web-browsing</member></application>
+                <action>allow</action>
+              </entry>"""
+
+
+def test_rule_after_wide_open_rule_is_shadowed():
+    findings = check_shadowed_rule("fw1", [_rule(WIDE_OPEN), _rule(SPECIFIC)])
+    assert len(findings) == 1
+    f = findings[0]
+    assert f.check == "shadowed-rule"
+    assert f.severity == "medium"
+    assert f.rule == "allow-web"
+    assert "catch-everything" in f.detail
+
+
+def test_wider_rule_after_specific_rule_is_not_shadowed():
+    """First-match top-down: the wide rule still matches everything the
+    specific one doesn't — shadowing is directional."""
+    assert check_shadowed_rule("fw1", [_rule(SPECIFIC), _rule(WIDE_OPEN)]) == []
+
+
+def test_identical_duplicate_rule_is_shadowed():
+    dup = SPECIFIC.replace('name="allow-web"', 'name="allow-web-copy"')
+    findings = check_shadowed_rule("fw1", [_rule(SPECIFIC), _rule(dup)])
+    assert [f.rule for f in findings] == ["allow-web-copy"]
+
+
+def test_disjoint_rules_do_not_shadow():
+    other = SPECIFIC.replace("web-srv-1", "db-srv-1").replace(
+        'name="allow-web"', 'name="allow-db"'
+    )
+    assert check_shadowed_rule("fw1", [_rule(SPECIFIC), _rule(other)]) == []
+
+
+def test_member_subset_shadows_without_any():
+    """Coverage is subset-based, not just 'any': {branch-lan} sits inside
+    {branch-lan, dmz-lan} on every differing field."""
+    wider = SPECIFIC.replace(
+        "<source><member>branch-lan</member></source>",
+        "<source><member>branch-lan</member><member>dmz-lan</member></source>",
+    ).replace('name="allow-web"', 'name="allow-web-both-lans"')
+    findings = check_shadowed_rule("fw1", [_rule(wider), _rule(SPECIFIC)])
+    assert [f.rule for f in findings] == ["allow-web"]
+
+
+def test_disabled_rules_neither_shadow_nor_get_flagged():
+    disabled_wide = _rule(WIDE_OPEN.replace("</entry>", "<disabled>yes</disabled></entry>"))
+    assert check_shadowed_rule("fw1", [disabled_wide, _rule(SPECIFIC)]) == []
+    disabled_specific = _rule(SPECIFIC.replace("</entry>", "<disabled>yes</disabled></entry>"))
+    assert check_shadowed_rule("fw1", [_rule(WIDE_OPEN), disabled_specific]) == []
+
+
+def test_one_finding_per_shadowed_rule_naming_earliest_shadower():
+    """Two wide rules above a victim: the second wide rule is itself shadowed
+    by the first, and the victim reports the EARLIEST shadower once — not one
+    finding per shadower."""
+    second_wide = WIDE_OPEN.replace('name="catch-everything"', 'name="also-everything"')
+    findings = check_shadowed_rule(
+        "fw1", [_rule(WIDE_OPEN), _rule(second_wide), _rule(SPECIFIC)]
+    )
+    assert [f.rule for f in findings] == ["also-everything", "allow-web"]
+    assert all("'catch-everything'" in f.detail for f in findings)
 
 
 def test_panorama_pre_rulebase_rules_are_found():
